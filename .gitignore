@@ -1,0 +1,22 @@
+# Local editor / venv
+.vscode/
+.venv/
+
+# Dataset
+data/cifar_10/
+data/cifar_10.tar.gz
+data/*.tar.gz
+data/*.zip
+
+# Model checkpoints / TorchScript
+*.pt
+*.pth
+*.onnx
+*.ckpt
+
+# Runtime heavy inputs
+runs/dgx_spark_full_cpp/cpp_full_test/inputs/
+
+# Draft papers
+paper.md
+paper_presentations_results.md

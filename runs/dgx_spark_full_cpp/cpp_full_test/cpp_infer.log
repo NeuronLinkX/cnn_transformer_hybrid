@@ -1,0 +1,13 @@
+batch_predictions: runs/dgx_spark_full_cpp/cpp_full_test/predictions.tsv
+samples=10000 correct=9479 accuracy=0.9479
+[CONFUSION_MATRIX]
+963 0 4 1 1 0 2 1 23 5
+8 964 1 0 0 0 0 0 5 22
+6 0 934 18 18 8 11 3 2 0
+5 0 10 879 13 65 16 7 5 0
+5 0 6 12 952 1 2 21 1 0
+2 0 5 65 14 899 4 10 0 1
+2 1 5 8 4 5 974 1 0 0
+3 0 2 0 12 8 1 974 0 0
+12 2 3 0 0 0 0 1 980 2
+4 25 0 0 2 1 0 0 8 960

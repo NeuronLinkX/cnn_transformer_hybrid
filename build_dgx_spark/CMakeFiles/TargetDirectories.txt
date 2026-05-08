@@ -1,0 +1,3 @@
+/home/jiwoo/Desktop/workspace/cnn_transformer_cifar10/build_dgx_spark/CMakeFiles/cifar10_infer.dir
+/home/jiwoo/Desktop/workspace/cnn_transformer_cifar10/build_dgx_spark/CMakeFiles/edit_cache.dir
+/home/jiwoo/Desktop/workspace/cnn_transformer_cifar10/build_dgx_spark/CMakeFiles/rebuild_cache.dir

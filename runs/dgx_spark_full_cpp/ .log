@@ -1,0 +1,14 @@
+[INFO] checkpoint=/home/jiwoo/Desktop/workspace/cnn_transformer_cifar10/runs/dgx_spark_full_cpp/best.pth
+[INFO] device=cuda
+[TEST] loss=0.2153 acc=0.9489 macro_f1=0.9488
+[CONFUSION_MATRIX]
+961 1 4 1 1 0 2 1 24 5
+7 964 1 0 0 1 0 0 5 22
+6 0 938 17 18 8 8 3 2 0
+6 0 11 883 12 62 15 7 4 0
+5 0 6 12 949 2 4 20 2 0
+2 0 6 63 14 901 3 10 0 1
+2 1 4 8 2 5 977 1 0 0
+3 0 3 0 12 8 1 973 0 0
+12 2 2 0 0 0 0 1 980 3
+4 23 0 0 2 1 0 0 7 963
