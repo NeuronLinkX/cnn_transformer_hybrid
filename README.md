@@ -51,6 +51,12 @@ cnn_transformer_cifar10/
     └── dgx_spark_full_cpp_pipeline.sh
 ```
 
+## Final Training And Inference Settings
+
+![Fig.0](fig0_cifar-10_batch_inference_settings.png)
+
+*Fig.0. Consolidated training and C++ batch inference configuration summary for the Hybrid CNN-Transformer CIFAR-10 pipeline. The figure reports dataset composition, training schedule, optimization settings, Transformer configuration, and final LibTorch inference accuracy obtained from the full 10,000-image CIFAR-10 evaluation run.*
+
 ## Dataset Facts
 ## Final Evaluation Summary
 
