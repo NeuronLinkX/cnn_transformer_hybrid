@@ -117,11 +117,11 @@ C++ Inference Runtime
 
 Code locations for each stage:
 
-- `Python resize / normalize / dataloading`: [python/utils/data.py](/home/jiwoo/Desktop/workspace/cnn_transformer_cifar10/python/utils/data.py)
-- `Hybrid model definition`: [python/models/hybrid.py](/home/jiwoo/Desktop/workspace/cnn_transformer_cifar10/python/models/hybrid.py)
-- `Training / checkpoint save`: [python/train.py](/home/jiwoo/Desktop/workspace/cnn_transformer_cifar10/python/train.py)
-- `TorchScript export (.pth -> .pt)`: [python/export_torchscript.py](/home/jiwoo/Desktop/workspace/cnn_transformer_cifar10/python/export_torchscript.py)
-- `C++ preprocess / LibTorch forward / batch output`: [cpp_infer/main.cpp](/home/jiwoo/Desktop/workspace/cnn_transformer_cifar10/cpp_infer/main.cpp)
+- `Python resize / normalize / dataloading`: [python/utils/data.py](python/utils/data.py)
+- `Hybrid model definition`: [python/models/hybrid.py](python/models/hybrid.py)
+- `Training / checkpoint save`: [python/train.py](python/train.py)
+- `TorchScript export (.pth -> .pt)`: [python/export_torchscript.py](python/export_torchscript.py)
+- `C++ preprocess / LibTorch forward / batch output`: [cpp_infer/main.cpp](cpp_infer/main.cpp)
 
 ## Installation
 
