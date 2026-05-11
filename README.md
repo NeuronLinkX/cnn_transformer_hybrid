@@ -52,6 +52,19 @@ cnn_transformer_cifar10/
 ```
 
 ## Dataset Facts
+## Final Evaluation Summary
+
+| Metric | Result |
+|---|---:|
+| Best Validation Accuracy (Phase 2) | 95.46% |
+| Python Test Accuracy | 94.89% |
+| C++ LibTorch Inference Accuracy | 94.79% |
+| Correct Predictions | 9479 / 10000 |
+| Test Dataset Size | 10000 |
+| Classes | 10 |
+| Input Resolution | 224 × 224 |
+| Backbone | ResNet-18 |
+| Transformer Tokens | 49 + CLS |
 
 - CIFAR-10 contains 60,000 color images.
 - The original image size is `32x32`, not `224x224`.
@@ -271,7 +284,6 @@ Interpretation of this row:
 - `target_idx=3`, `target_name=cat`: the ground-truth label is `cat`
 - `file_name=00000_cat.png`: the C++ program should load `runs/dgx_spark_full_cpp/cpp_full_test/inputs/00000_cat.png`
 
-### `predictions.tsv`
 ### Confusion Matrix Analysis
 
 ![Fig2](fig2_normalized_confusion_matrix.png)
@@ -351,10 +363,45 @@ python -m compileall python
 python python/train.py --config configs/cifar10_hybrid_smoke.yaml --model hybrid --device cpu --output-dir runs/smoke_test
 ```
 
+## Qualitative Prediction Analysis
+
+### Lowest Confidence Predictions
+
+![Fig5](fig5_lowest_confidence_predictions.png)
+
+*Fig.5. Lowest-confidence predictions on the CIFAR-10 test set. These samples typically contain ambiguous visual structure, motion blur, unusual viewpoints, partial occlusion, or semantic overlap between classes.*
+
+---
+
+### Most Confident Correct Predictions
+
+![Fig6](fig6_most_confident_correct_predictions.png)
+
+*Fig.6. Most confident correct predictions produced by the Hybrid CNN-Transformer model. These samples exhibit strong class-specific semantic features and clear visual separability.*
+
+---
+
+### Most Confident Wrong Predictions
+
+![Fig7](fig7_most_confident_wrong_predictions.png)
+
+*Fig.7. Most confident incorrect predictions on the CIFAR-10 test set. These examples reveal semantically similar class pairs where the model produces highly confident but incorrect decisions.*
+
 ## References
 
-1. CIFAR-10 dataset
-2. He et al., Deep Residual Learning for Image Recognition
-3. Dosovitskiy et al., An Image is Worth 16x16 Words
-4. Vaswani et al., Attention Is All You Need
-5. PyTorch documentation for TorchScript, `torch.export`, and model serialization
+1. Krizhevsky, A. "CIFAR-10 Dataset."
+2. He, K., Zhang, X., Ren, S., and Sun, J.
+   "Deep Residual Learning for Image Recognition."
+   CVPR 2016.
+   
+3. Dosovitskiy, A. et al.
+   "An Image is Worth 16x16 Words:
+   Transformers for Image Recognition at Scale."
+   ICLR 2021.
+
+4. Vaswani, A. et al.
+   "Attention Is All You Need."
+   NeurIPS 2017.
+
+5. PyTorch Documentation:
+   TorchScript, torch.export, LibTorch.
