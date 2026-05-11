@@ -60,6 +60,11 @@ cnn_transformer_cifar10/
 
 ## Architecture
 
+![Fig.1](fig1_overall_pipeline_architecture.png)
+
+*Fig.1. Overall architecture and end-to-end pipeline of the Hybrid CNN-Transformer system for CIFAR-10 classification.*
+
+
 ```text
 Python Training / Model Definition
   CIFAR-10 Image (32x32)
@@ -267,6 +272,19 @@ Interpretation of this row:
 - `file_name=00000_cat.png`: the C++ program should load `runs/dgx_spark_full_cpp/cpp_full_test/inputs/00000_cat.png`
 
 ### `predictions.tsv`
+### Confusion Matrix Analysis
+
+![Fig2](fig2_normalized_confusion_matrix.png)
+
+*Fig.2. normalized confusion matrix on the CIFAR-10 test set.*
+
+![Fig3](fig3_prediction_distribution_analysis.png)
+
+*Fig.3. Ground-truth and predicted class distribution comparison for the full C++ inference evaluation.*
+
+![Fig4](fig4_semantic_error_topology.png)
+
+*Fig.4. Semantic misclassification topology derived from the CIFAR-10 inference results.*
 
 `predictions.tsv` is the batch inference result file written by the C++ inference binary for all 10,000 CIFAR-10 test images.
 
