@@ -7,13 +7,11 @@ import argparse
 import base64
 import csv
 import html
-import json
-import math
 import mimetypes
 import os
+import shutil
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +19,11 @@ try:
     import torch
 except ImportError:  # pragma: no cover - optional dependency at runtime
     torch = None
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - optional dependency at runtime
+    yaml = None
 
 
 CLASS_NAMES = (
@@ -35,30 +38,6 @@ CLASS_NAMES = (
     "ship",
     "truck",
 )
-
-ARTIFACT_DESCRIPTIONS = {
-    "best.pth": (
-        "Primary PyTorch checkpoint selected by validation accuracy. "
-        "This is the checkpoint used for evaluation and TorchScript export."
-    ),
-    "best_phase1.pth": (
-        "Best checkpoint from phase 1, where the CNN backbone stayed frozen "
-        "and only the transformer/head were trained."
-    ),
-    "best_phase2.pth": (
-        "Best checkpoint from phase 2 fine-tuning, where the full hybrid model "
-        "was trained end-to-end."
-    ),
-    "final_hybrid.pth": (
-        "Checkpoint saved at the final training epoch. It is useful for auditing "
-        "the last state, but it is not guaranteed to be the best model."
-    ),
-    "hybrid_cifar10_full_ts.pt": (
-        "TorchScript export consumed by the LibTorch C++ binary. "
-        "This is the deployment-oriented artifact for `cifar10_infer`."
-    ),
-}
-
 
 @dataclass
 class PredictionRow:
@@ -179,44 +158,126 @@ def build_confusion_from_predictions(rows: list[PredictionRow]) -> list[list[int
     return matrix
 
 
-def build_artifact_rows(run_dir: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for name, description in ARTIFACT_DESCRIPTIONS.items():
-        path = run_dir / name
-        if not path.exists():
+def load_run_metadata(run_dir: Path) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "train_samples": 45000,
+        "val_samples": 5000,
+        "test_samples": 10000,
+        "phase1_epochs": 10,
+        "phase2_epochs": 20,
+        "config": {
+            "seed": 42,
+            "num_classes": 10,
+            "image_size": 224,
+            "batch_size": 64,
+            "num_workers": 4,
+            "epochs_phase1": 10,
+            "epochs_phase2": 20,
+            "lr_phase1": 0.0001,
+            "lr_phase2": 0.00005,
+            "weight_decay": 0.0001,
+            "model": {
+                "backbone": "resnet18",
+                "pretrained": True,
+                "embed_dim": 512,
+                "transformer_depth": 2,
+                "num_heads": 8,
+                "mlp_ratio": 4.0,
+                "dropout": 0.1,
+            },
+        },
+    }
+    config_path = Path("configs/cifar10_hybrid_full.yaml")
+    if yaml is not None and config_path.exists():
+        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            metadata["config"] = loaded
+            metadata["phase1_epochs"] = int(loaded.get("epochs_phase1", metadata["phase1_epochs"]))
+            metadata["phase2_epochs"] = int(loaded.get("epochs_phase2", metadata["phase2_epochs"]))
+    if torch is None:
+        return metadata
+
+    checkpoint_candidates = (
+        run_dir / "best.pth",
+        run_dir / "final_hybrid.pth",
+        run_dir / "best_phase2.pth",
+    )
+    for checkpoint_path in checkpoint_candidates:
+        if not checkpoint_path.exists():
             continue
-        entry: dict[str, Any] = {
-            "name": name,
-            "path": path,
-            "description": description,
-            "size_mb": path.stat().st_size / (1024 * 1024),
-            "mtime": datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        if path.suffix == ".pth":
-            entry["type_summary"] = (
-                ".pth is a Python-side PyTorch checkpoint. "
-                "It usually stores `model_state_dict` and metadata for training or evaluation."
-            )
-            if torch is not None:
-                try:
-                    payload = torch.load(path, map_location="cpu")
-                    if isinstance(payload, dict):
-                        entry["keys"] = sorted(payload.keys())
-                        if "epoch" in payload:
-                            entry["epoch"] = payload["epoch"]
-                        if "phase" in payload:
-                            entry["phase"] = payload["phase"]
-                        if "val_acc" in payload:
-                            entry["val_acc"] = payload["val_acc"]
-                except Exception as exc:  # pragma: no cover - best effort inspection
-                    entry["inspect_error"] = str(exc)
-        elif path.suffix == ".pt":
-            entry["type_summary"] = (
-                ".pt here is the TorchScript export. "
-                "It is a serialized executable graph for the C++ LibTorch runtime."
-            )
-        rows.append(entry)
-    return rows
+        try:
+            payload = torch.load(checkpoint_path, map_location="cpu")
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        cfg = payload.get("config")
+        if not isinstance(cfg, dict):
+            continue
+        metadata["phase1_epochs"] = int(cfg.get("epochs_phase1", metadata["phase1_epochs"]))
+        metadata["phase2_epochs"] = int(cfg.get("epochs_phase2", metadata["phase2_epochs"]))
+        metadata["config"] = cfg
+        break
+    return metadata
+
+
+def render_config_cards(cfg: dict[str, Any]) -> str:
+    model_cfg = cfg.get("model", {})
+    items = [
+        ("seed", cfg.get("seed")),
+        ("num_classes", cfg.get("num_classes")),
+        ("image_size", cfg.get("image_size")),
+        ("batch_size", cfg.get("batch_size")),
+        ("num_workers", cfg.get("num_workers")),
+        ("epochs_phase1", cfg.get("epochs_phase1")),
+        ("epochs_phase2", cfg.get("epochs_phase2")),
+        ("lr_phase1", cfg.get("lr_phase1")),
+        ("lr_phase2", cfg.get("lr_phase2")),
+        ("weight_decay", cfg.get("weight_decay")),
+        ("backbone", model_cfg.get("backbone")),
+        ("pretrained", model_cfg.get("pretrained")),
+        ("embed_dim", model_cfg.get("embed_dim")),
+        ("transformer_depth", model_cfg.get("transformer_depth")),
+        ("num_heads", model_cfg.get("num_heads")),
+        ("mlp_ratio", model_cfg.get("mlp_ratio")),
+        ("dropout", model_cfg.get("dropout")),
+    ]
+    cards = []
+    for label, value in items:
+        cards.append(
+            '<article class="config-card">'
+            f'<span class="config-label">{html.escape(str(label))}</span>'
+            f'<span class="config-value">{html.escape(str(value))}</span>'
+            '</article>'
+        )
+    return "".join(cards)
+
+
+def copy_architecture_image(output_path: Path) -> Path | None:
+    source_path = Path(__file__).resolve().parents[1] / "src" / "hybrid_model.png"
+    if not source_path.exists():
+        return None
+    asset_dir = output_path.resolve().parent / "assets"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    target_path = asset_dir / "hybrid_model.png"
+    shutil.copy2(source_path, target_path)
+    return target_path
+
+
+def render_architecture_image(output_path: Path) -> str:
+    image_path = copy_architecture_image(output_path)
+    if image_path is None:
+        return (
+            '<div class="empty-state">'
+            'Missing architecture image: <code>src/hybrid_model.png</code>'
+            "</div>"
+        )
+    image_src = Path(os.path.relpath(image_path, start=output_path.resolve().parent))
+    return (
+        '<div class="architecture-image-wrap">'
+        f'<img class="architecture-image" src="{image_src.as_posix()}" alt="Hybrid model architecture">'
+        "</div>"
+    )
 
 
 def svg_bar_chart(counts: dict[str, int], title: str) -> str:
@@ -314,7 +375,7 @@ def render_gallery(title: str, rows: list[PredictionRow], output_path: Path) -> 
 def build_report(
     rows: list[PredictionRow],
     log_info: dict[str, Any],
-    artifacts: list[dict[str, Any]],
+    run_metadata: dict[str, Any],
     output_path: Path,
     top_k: int,
 ) -> str:
@@ -370,36 +431,6 @@ def build_report(
         else "does not match predictions.tsv"
     )
 
-    artifact_cards: list[str] = []
-    for artifact in artifacts:
-        meta_bits = [
-            f"<div><strong>path</strong>: {html.escape(str(artifact['path']))}</div>",
-            f"<div><strong>size</strong>: {artifact['size_mb']:.2f} MB</div>",
-            f"<div><strong>modified</strong>: {artifact['mtime']}</div>",
-            f"<div><strong>meaning</strong>: {html.escape(artifact['type_summary'])}</div>",
-        ]
-        if "phase" in artifact:
-            meta_bits.append(f"<div><strong>phase</strong>: {html.escape(str(artifact['phase']))}</div>")
-        if "epoch" in artifact:
-            meta_bits.append(f"<div><strong>epoch</strong>: {artifact['epoch']}</div>")
-        if artifact.get("val_acc") is not None:
-            meta_bits.append(f"<div><strong>val_acc</strong>: {artifact['val_acc']:.4f}</div>")
-        if "keys" in artifact:
-            meta_bits.append(
-                f"<div><strong>checkpoint keys</strong>: {html.escape(', '.join(artifact['keys']))}</div>"
-            )
-        if "inspect_error" in artifact:
-            meta_bits.append(
-                f"<div><strong>inspect_error</strong>: {html.escape(artifact['inspect_error'])}</div>"
-            )
-        artifact_cards.append(
-            '<article class="artifact-card">'
-            f"<h3>{html.escape(artifact['name'])}</h3>"
-            f"<p>{html.escape(artifact['description'])}</p>"
-            f"<div class=\"artifact-meta\">{''.join(meta_bits)}</div>"
-            "</article>"
-        )
-
     class_rows_html = "".join(
         "<tr>"
         f"<td>{html.escape(entry['name'])}</td>"
@@ -421,17 +452,15 @@ def build_report(
         for (target, pred), count in confusion_pairs
     )
 
-    summary_payload = {
-        "samples": total,
-        "correct": correct,
-        "accuracy": accuracy,
-        "incorrect": total - correct,
-        "avg_confidence": avg_conf,
-        "avg_confidence_correct": avg_conf_correct,
-        "avg_confidence_wrong": avg_conf_wrong,
-        "log_accuracy": log_accuracy,
-        "log_accuracy_note": log_note if log_accuracy is not None else "missing in cpp_infer.log",
-    }
+    train_samples = int(run_metadata["train_samples"])
+    val_samples = int(run_metadata["val_samples"])
+    test_samples = int(run_metadata["test_samples"])
+    phase1_epochs = int(run_metadata["phase1_epochs"])
+    phase2_epochs = int(run_metadata["phase2_epochs"])
+    total_epochs = phase1_epochs + phase2_epochs
+    cfg = run_metadata["config"]
+    architecture_image = render_architecture_image(output_path)
+    config_cards = render_config_cards(cfg)
 
     html_report = f"""<!DOCTYPE html>
 <html lang="en">
@@ -544,6 +573,30 @@ def build_report(
       color: #54311d;
       line-height: 1.6;
     }}
+    .config-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+    }}
+    .config-card {{
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(217, 205, 191, 0.82);
+    }}
+    .config-label {{
+      display: block;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-bottom: 8px;
+    }}
+    .config-value {{
+      display: block;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--ink);
+      word-break: break-word;
+    }}
     table {{
       width: 100%;
       border-collapse: collapse;
@@ -600,55 +653,22 @@ def build_report(
     }}
     .sample-head.correct {{ color: var(--good); }}
     .sample-head.wrong {{ color: var(--bad); }}
-    .artifact-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 16px;
-    }}
-    .artifact-card {{
-      padding: 18px;
-      border-radius: 18px;
-      background: rgba(255, 255, 255, 0.78);
-      border: 1px solid rgba(217, 205, 191, 0.82);
-    }}
-    .artifact-card h3 {{
-      margin: 0 0 8px;
-      font-size: 1.05rem;
-    }}
-    .artifact-card p {{
-      margin: 0 0 12px;
-      color: var(--muted);
-      line-height: 1.55;
-    }}
-    .artifact-meta {{
-      display: grid;
-      gap: 6px;
-      font-size: 0.9rem;
-      color: #394552;
-    }}
-    pre {{
-      padding: 14px 16px;
-      overflow-x: auto;
-      border-radius: 16px;
-      border: 1px solid rgba(217, 205, 191, 0.82);
-      background: #f7f2ea;
-      color: #24303b;
-    }}
     .empty-state {{
       padding: 20px;
       border: 1px dashed var(--line);
       border-radius: 16px;
       color: var(--muted);
     }}
-    .footer-note {{
-      margin-top: 18px;
-      color: var(--muted);
-      font-size: 0.92rem;
+    .architecture-image-wrap {{
+      border-radius: 22px;
+      overflow: hidden;
+      border: 1px solid rgba(217, 205, 191, 0.82);
+      background: rgba(255, 255, 255, 0.7);
     }}
-    .json-block {{
-      margin: 0;
-      white-space: pre-wrap;
-      word-break: break-word;
+    .architecture-image {{
+      width: 100%;
+      height: auto;
+      display: block;
     }}
     @media (max-width: 960px) {{
       .two-up, .three-up {{
@@ -662,33 +682,43 @@ def build_report(
     <section class="hero">
       <h1>C++ CIFAR-10 Batch Inference Report</h1>
       <p>
-        This report combines <code>predictions.tsv</code> and <code>cpp_infer.log</code>
-        into a visual summary. It shows overall accuracy, class-level behavior, confusion
-        structure, sample thumbnails, and the meaning of the generated <code>.pth</code>
-        and <code>.pt</code> artifacts under <code>runs/dgx_spark_full_cpp</code>.
+        This report summarizes the full CIFAR-10 workflow with only the final essentials:
+        how many samples were used, in what order the run proceeded, and what final accuracy
+        the C++ inference stage achieved.
       </p>
       <div class="summary-grid">
-        <article class="stat-card"><span class="label">Samples</span><span class="value">{total}</span></article>
+        <article class="stat-card"><span class="label">Train samples</span><span class="value">{train_samples}</span></article>
+        <article class="stat-card"><span class="label">Validation samples</span><span class="value">{val_samples}</span></article>
+        <article class="stat-card"><span class="label">Test samples</span><span class="value">{test_samples}</span></article>
+        <article class="stat-card"><span class="label">Total epochs</span><span class="value">{total_epochs}</span></article>
         <article class="stat-card"><span class="label">Correct</span><span class="value">{correct}</span></article>
         <article class="stat-card"><span class="label">Accuracy</span><span class="value">{accuracy:.4f}</span></article>
-        <article class="stat-card"><span class="label">Incorrect</span><span class="value">{total - correct}</span></article>
-        <article class="stat-card"><span class="label">Avg confidence</span><span class="value">{avg_conf:.4f}</span></article>
-        <article class="stat-card"><span class="label">Avg wrong confidence</span><span class="value">{avg_conf_wrong:.4f}</span></article>
       </div>
     </section>
     <main>
       <section class="panel">
-        <h2>Run Summary</h2>
+        <h2>Final Conclusion</h2>
         <div class="callout">
-          <strong>Computed from predictions.tsv:</strong> accuracy={accuracy:.4f},
-          correct={correct}, samples={total}.<br>
-          <strong>Read from cpp_infer.log:</strong>
-          samples={html.escape(str(log_info.get('samples', 'missing')))},
-          correct={html.escape(str(log_info.get('correct', 'missing')))},
-          accuracy={html.escape(str(log_info.get('accuracy', 'missing')))}.
-          This {html.escape(log_note)}.
+          전체 학습은 <strong>{train_samples}장</strong>으로 진행했고, 검증은 <strong>{val_samples}장</strong>,
+          최종 C++ 테스트 평가는 <strong>{test_samples}장</strong>으로 수행했습니다.<br>
+          순서는 <strong>1) phase1 {phase1_epochs} epoch</strong>에서 backbone을 고정한 학습,
+          <strong>2) phase2 {phase2_epochs} epoch</strong>에서 전체 fine-tuning,
+          <strong>3) TorchScript export</strong>, <strong>4) C++ batch inference</strong> 입니다.<br>
+          최종 결과는 <strong>{correct} / {total}</strong> 정답, <strong>accuracy={accuracy:.4f}</strong> 입니다.
         </div>
-        <pre class="json-block">{html.escape(json.dumps(summary_payload, indent=2))}</pre>
+      </section>
+
+      <section class="panel">
+        <h2>End-to-End Architecture</h2>
+        {architecture_image}
+      </section>
+
+      <section class="panel">
+        <h2>Configuration Visualization</h2>
+        <div class="callout">
+          학습, 토큰화, Transformer 깊이, head 수, dropout, learning rate까지 현재 실행 설정값을 한 눈에 보이도록 정리했습니다.
+        </div>
+        <div class="config-grid">{config_cards}</div>
       </section>
 
       <section class="panel">
@@ -737,47 +767,6 @@ def build_report(
       {render_gallery("Most Confident Wrong Predictions", hardest_errors, output_path)}
       {render_gallery("Lowest Confidence Predictions", least_confident, output_path)}
       {render_gallery("Most Confident Correct Predictions", strongest_correct, output_path)}
-
-      <section class="panel">
-        <h2>What The .pth And .pt Files Mean</h2>
-        <div class="callout">
-          <strong>.pth</strong> files are Python-side PyTorch checkpoints. They keep model weights
-          plus metadata such as training phase, epoch, and validation accuracy. They are used
-          for training resume, evaluation, and exporting new runtime artifacts.<br>
-          <strong>.pt</strong> in this run is the TorchScript export. It is the C++-ready model
-          package loaded by the LibTorch binary <code>build_dgx_spark/cifar10_infer</code>.
-          In short: <code>.pth</code> is for Python training workflows, and <code>.pt</code> is
-          the deployment artifact for the current C++ inference path.
-        </div>
-        <div class="artifact-grid">{''.join(artifact_cards)}</div>
-      </section>
-
-      <section class="panel">
-        <h2>Raw cpp_infer.log</h2>
-        <pre>{html.escape(log_info['raw_text'])}</pre>
-      </section>
-
-      <section class="panel">
-        <h2>Interpretation Notes</h2>
-        <div class="three-up">
-          <div>
-            <strong>Overall result</strong>
-            <p>The C++ run reached {accuracy:.2%} accuracy on 10,000 CIFAR-10 test images. That corresponds to {total - correct} mistakes.</p>
-          </div>
-          <div>
-            <strong>Error style</strong>
-            <p>High-confidence wrong samples are especially useful because they show systematic confusion rather than simple uncertainty.</p>
-          </div>
-          <div>
-            <strong>Artifact flow</strong>
-            <p>The usual path is <code>best.pth</code> -> <code>hybrid_cifar10_full_ts.pt</code> -> C++ batch inference -> <code>predictions.tsv</code> and <code>cpp_infer.log</code>.</p>
-          </div>
-        </div>
-        <div class="footer-note">
-          Generated at {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} from
-          <code>{html.escape(str(output_path.parent.parent / 'runs'))}</code>-relative project data.
-        </div>
-      </section>
     </main>
   </div>
 </body>
@@ -794,9 +783,9 @@ def main() -> None:
     args = parse_args()
     rows = load_predictions(args.predictions)
     log_info = parse_cpp_log(args.log)
-    artifacts = build_artifact_rows(args.run_dir)
+    run_metadata = load_run_metadata(args.run_dir)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    report = build_report(rows, log_info, artifacts, args.output, args.top_k)
+    report = build_report(rows, log_info, run_metadata, args.output, args.top_k)
     args.output.write_text(report, encoding="utf-8")
     print(f"saved: {args.output}")
 
